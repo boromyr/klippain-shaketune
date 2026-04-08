@@ -65,7 +65,7 @@ class VibrationsComputation:
         shaper_calibrate, _ = get_shaper_calibrate_module()
 
         for measurement in self.measurements:
-            data = np.array(measurement['samples'])
+            data = np.asarray(measurement['samples'])
             if data is None:
                 continue  # Measurement data is not in the expected format or is empty, skip it
 
