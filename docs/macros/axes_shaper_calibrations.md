@@ -22,6 +22,7 @@ Then, call the `AXES_SHAPER_CALIBRATION` macro and look for the graphs in the re
 |Z_HEIGHT|None|Z height wanted for the test. This value can be used if needed to override the Z value of the probe_point set in your `[resonance_tester]` config section|
 |MAX_SCALE|None|maximum energy value to scale the input shaper graph. Useful for comparing multiple consecutive tests by forcing the same energy scale|
 |ACCEL_CHIP|None|accelerometer chip you want to use for the test. If not provided, the macro will automatically find the best accelerometer chip for each axis based on your `[resonance_tester]` config section|
+|PROFILE|"lowvibr"|which recommended filter to apply and save to `printer.cfg`. Use "lowvibr" (the low-vibration filter shown in cyan on the graph, which is Klipper's recommendation) or "performance" (the higher-acceleration filter, when available)|
 
 
   > **Note**
@@ -52,7 +53,7 @@ For setting your Input Shaping filters, rely on the auto-computed values display
     * Sometimes only a single recommendation is given as the "best" shaper. This means that either no suitable "performance" shaper was found (due to a high level of residual vibrations or too much smoothing), or that the "low vibration" shaper is the same as the "performance" shaper.
   - **Damping Ratio**: At the end, you will see an estimate based on your measured data, which will be used to better tailor the shaper recommendations to your machine. You need to define it in the `[input_shaper]` section.
 
-Then, add to your configuration:
+The corresponding `[input_shaper]` config looks like this:
 ```
 [input_shaper]
 shaper_freq_x: ... # center frequency for the X axis filter
@@ -62,6 +63,10 @@ shaper_type_y: ... # filter type for the Y axis
 damping_ratio_x: ... # damping ratio for the X axis
 damping_ratio_y: ... # damping ratio for the Y axis
 ```
+
+  > **Note**
+  >
+  > Since the latest version, `AXES_SHAPER_CALIBRATION` does this automatically for you: at the end of the run it applies the recommended filter at runtime (`SET_INPUT_SHAPER`) and writes the `shaper_type`, `shaper_freq` and `damping_ratio` values for each measured axis to your `printer.cfg`, then triggers a `SAVE_CONFIG` (which restarts the firmware). By default the "low vibration" filter is used (the one shown in cyan on the graph); use the `PROFILE=performance` parameter if you'd rather save the performance filter instead.
 
 ## Useful facts and myths debunking
 

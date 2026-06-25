@@ -62,6 +62,15 @@ class GraphCreator(abc.ABC):
         result = computation.compute()
         fig = self._plotter.plot(result)
         self._save_figure(fig)
+        self._export_results(result)
+
+    def _export_results(self, result) -> None:
+        """Hook for subclasses to export computed results (e.g. to a sidecar file).
+
+        This runs inside the Shake&Tune child process, so it's used to hand back the
+        computed values to the main Klipper process through a file. No-op by default.
+        """
+        pass
 
     def _save_figure(self, fig: Figure) -> None:
         """Save the figure to disk"""

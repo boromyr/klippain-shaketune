@@ -8,7 +8,9 @@
 #              The script performs resonance tests along specified axes, starts and stops measurements,
 #              and generates graphs for each axis to analyze the collected data.
 
+import json
 from datetime import datetime
+from pathlib import Path
 
 from ..helpers.accelerometer import Accelerometer, MeasurementsManager
 from ..helpers.common_func import AXIS_CONFIG
@@ -16,6 +18,56 @@ from ..helpers.compat import KlipperCompatibility
 from ..helpers.console_output import ConsoleOutput
 from ..helpers.resonance_test import vibrate_axis
 from ..shaketune_process import ShakeTuneProcess
+
+
+def _save_input_shaper_profile(printer, gcode, input_shaper, axis: str, filename: Path) -> bool:
+    """Read the shaper profile exported by the child process and apply + stage it in the config.
+
+    Applies the recommended filter at runtime through SET_INPUT_SHAPER (when an [input_shaper]
+    object exists) and stages shaper_type/shaper_freq/damping_ratio in printer.cfg through the
+    configfile object. The staged values are written out when SAVE_CONFIG is run afterwards.
+
+    Returns True if some values were staged in the config, False otherwise.
+    """
+    profile_file = filename.with_suffix('.shaper.json')
+    if not profile_file.exists():
+        ConsoleOutput.print(f'Warning: no computed shaper profile found for the {axis.upper()} axis to save!')
+        return False
+
+    try:
+        with open(profile_file) as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        ConsoleOutput.print(f'Warning: failed to read the computed shaper profile for the {axis.upper()} axis: {e}')
+        return False
+    finally:
+        profile_file.unlink(missing_ok=True)
+
+    shaper_type = data['shaper_type']
+    shaper_freq = data['shaper_freq']
+    damping_ratio = data['damping_ratio']
+    ax = axis.lower()
+
+    # Apply the filter at runtime so it's effective immediately (only if input_shaper is configured)
+    if input_shaper is not None:
+        gcode.run_script_from_command(
+            f'SET_INPUT_SHAPER '
+            f'SHAPER_TYPE_{ax.upper()}={shaper_type} '
+            f'SHAPER_FREQ_{ax.upper()}={shaper_freq:.1f} '
+            f'DAMPING_RATIO_{ax.upper()}={damping_ratio:.3f}'
+        )
+
+    # Stage the values in the config so they get written to printer.cfg on the next SAVE_CONFIG
+    configfile = printer.lookup_object('configfile')
+    configfile.set('input_shaper', f'shaper_type_{ax}', shaper_type)
+    configfile.set('input_shaper', f'shaper_freq_{ax}', f'{shaper_freq:.1f}')
+    configfile.set('input_shaper', f'damping_ratio_{ax}', f'{damping_ratio:.3f}')
+
+    ConsoleOutput.print(
+        f'Saved {ax.upper()} axis input shaper to config: {shaper_type} @ {shaper_freq:.1f} Hz '
+        f'(damping ratio {damping_ratio:.3f})'
+    )
+    return True
 
 
 def axes_shaper_calibration(gcmd, klipper_config, st_process: ShakeTuneProcess) -> None:
@@ -45,6 +97,9 @@ def axes_shaper_calibration(gcmd, klipper_config, st_process: ShakeTuneProcess) 
     z_height = gcmd.get_float('Z_HEIGHT', default=None, minval=1)
     max_scale = gcmd.get_int('MAX_SCALE', default=None, minval=1)
     accel_chip = gcmd.get('ACCEL_CHIP', default=None)
+    profile = gcmd.get('PROFILE', default='lowvibr').lower()
+    if profile not in {'lowvibr', 'performance'}:
+        raise gcmd.error('PROFILE selection invalid. Should be either lowvibr or performance!')
 
     if accel_per_hz == '':
         accel_per_hz = None
@@ -101,6 +156,7 @@ def axes_shaper_calibration(gcmd, klipper_config, st_process: ShakeTuneProcess) 
     filtered_config = [
         a for a in AXIS_CONFIG if a['axis'] == axis_input or (axis_input == 'all' and a['axis'] in ('x', 'y'))
     ]
+    saved_axes = []  # filenames of the axes whose computed profile should be saved to the config
     for config in filtered_config:
         filename = creator.get_folder() / f'{creator.get_type().replace(" ", "")}_{date}_{config["label"]}'
         measurements_manager = MeasurementsManager(
@@ -143,12 +199,15 @@ def axes_shaper_calibration(gcmd, klipper_config, st_process: ShakeTuneProcess) 
         # And finally generate the graph for each measured axis
         ConsoleOutput.print(f'{config["axis"].upper()} axis frequency profile generation...')
         ConsoleOutput.print('This may take some time (1-3min)')
-        creator.configure(scv, max_sm, test_params, max_scale)
+        creator.configure(scv, max_sm, test_params, max_scale, profile)
         creator.define_output_target(filename)
         measurements_manager.save_stdata()
         st_process.run(filename)
         st_process.wait_for_completion()
         toolhead.dwell(1)
+
+        # Keep track of the axis and its result file to save the computed profile afterward
+        saved_axes.append((config['axis'], filename))
 
     # Re-enable the input shaper if it was active
     if input_shaper is not None:
@@ -159,3 +218,15 @@ def axes_shaper_calibration(gcmd, klipper_config, st_process: ShakeTuneProcess) 
         gcode.run_script_from_command(f'SET_VELOCITY_LIMIT ACCEL={old_accel} MINIMUM_CRUISE_RATIO={old_mcr}')
     else:  # minimum_cruise_ratio not found: Klipper < v0.12.0-239
         gcode.run_script_from_command(f'SET_VELOCITY_LIMIT ACCEL={old_accel}')
+
+    # Apply and stage the computed input shaper profiles in the config, then persist them to printer.cfg.
+    # SAVE_CONFIG is run only once at the very end (it restarts the firmware) so it doesn't interrupt a
+    # multi-axis run between the X and Y measurements.
+    config_changed = False
+    for axis, filename in saved_axes:
+        if _save_input_shaper_profile(printer, gcode, input_shaper, axis, filename):
+            config_changed = True
+
+    if config_changed:
+        ConsoleOutput.print('Saving the new input shaper profiles to printer.cfg (this will restart the firmware)...')
+        gcode.run_script_from_command('SAVE_CONFIG')
