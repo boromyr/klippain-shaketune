@@ -33,7 +33,10 @@ def compare_belts_responses(gcmd, klipper_config, st_process: ShakeTuneProcess) 
     default_min_freq, default_max_freq, default_accel_per_hz, test_points = res_config
 
     min_freq = gcmd.get_float('FREQ_START', default=default_min_freq, minval=1)
-    max_freq = gcmd.get_float('FREQ_END', default=default_max_freq, minval=1)
+    # Cap the default sweep end at 90 Hz to avoid MCU "Timer too close" shutdowns: the belt
+    # resonances of interest sit below this, while higher frequencies spike both the step rate
+    # and the test acceleration (accel_per_hz * freq). A higher FREQ_END can still be forced explicitly.
+    max_freq = gcmd.get_float('FREQ_END', default=min(default_max_freq, 90.0), minval=1)
     hz_per_sec = gcmd.get_float('HZ_PER_SEC', default=1, minval=1)
     accel_per_hz = gcmd.get_float('ACCEL_PER_HZ', default=None)
     feedrate_travel = gcmd.get_float('TRAVEL_SPEED', default=120.0, minval=20.0)
