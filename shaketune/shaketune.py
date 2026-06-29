@@ -28,7 +28,7 @@ from .shaketune_process import ShakeTuneProcess
 DEFAULT_FOLDER = '~/printer_data/config/ShakeTune_results'
 DEFAULT_NUMBER_OF_RESULTS = 10
 DEFAULT_KEEP_RAW_DATA = False
-DEFAULT_MAX_FREQ = 100.0
+DEFAULT_MAX_FREQ = 90.0
 DEFAULT_DPI = 150
 DEFAULT_TIMEOUT = 600
 DEFAULT_SHOW_MACROS = True
